@@ -9,6 +9,7 @@
  * rev 0.5 - 2013-09-25 : Make changes to work with the Ical Module and minor fixes
  * rev 0.6 - 2013-09-28 : added status field and inserted an easy format way | added calendar name and description as configuration fields
  * rev 0.7 - 2013-09-29 : added VTODO | added SEQUENCE to notify update, based on latest modification
+ * rev 0.8 - 2013-10-01 : switch to mysqli
  *
  * parameter requested: _employeeid
  *
@@ -17,7 +18,7 @@
  * _ts: =1 to generate tasks
  */ 
 
-define('VERSION','0.7');
+define('VERSION','0.8');
 
 
 // Set headers
@@ -61,24 +62,21 @@ if (trim($calendarDescription) == "") {
 }
 
 
-/* Retrieve emloyee Id from its username */
-$get_employeeid = mysql_query("SELECT `id` FROM `contact_data_1` WHERE `f_login` = $loginId") or die(mysql_error);
-$empId = mysql_result($get_employeeid, 0, 'id');
+/* Connection to database using mysqli */
+$mysqli = new mysqli(DATABASE_HOST, DATABASE_USER, DATABASE_PASSWORD, DATABASE_NAME);
+if ($mysqli->connect_errno) {
+    die('Could not connect: (' . $mysqli->connect_errno . ') ' . $mysqli->connect_error);
+}
+
+
+/* Retrieve employee Id from its username */
+$get_employeeid = $mysqli->query("SELECT `id` FROM `contact_data_1` WHERE `f_login` = $loginId") or die($mysqli->error);
+$row = $get_employeeid->fetch_assoc(); // get first row
+$empId = $row['id'];
 
 
 /* Setting script timezone location */
 date_default_timezone_set(LOCATION);
-
-
-/* Connecting to database */
-$link = mysql_connect(DATABASE_HOST, DATABASE_USER, DATABASE_PASSWORD);
-if (!$link) {
-    die('Could not connect: ' . mysql_error());
-}
-$db_selected = mysql_select_db(DATABASE_NAME, $link);
-if (!$db_selected) {
-    die ('Can\'t use ' . DATABASE_NAME . ' : ' . mysql_error());
-}
 
 
 
@@ -122,14 +120,14 @@ if ($tasks) {
 			 " LEFT JOIN `user_login` ON `user_login`.`id` = `task_data_1`.`created_by`" .
 			 " WHERE (`task_data_1`.`f_employees` LIKE '%\_\_" . $empId . "\_\_%') AND (`task_data_1`.`active` = 1)";
 
-	$result = mysql_query($query);
+	$result = $mysqli->query($query);
 	if (!$result) {
-		$message  = 'Invalid query: ' . mysql_error() . "\r\n";
+		$message  = 'Invalid query: ' . $mysqli->error . "\r\n";
 		$message .= 'Whole query: ' . $query;
 		die($message);
 	}
 
-	while ($row = mysql_fetch_assoc($result)) {
+	while ($row = $result->fetch_assoc()) {
 
 		if (!$row['f_deadline']) {
 			$dtDateStart = getDatetime($row['created_on']) . "Z";
@@ -150,13 +148,13 @@ if ($tasks) {
 				  " WHERE (`task_edit_history`.`task_id` = " . $row['id'] . ")" .
 				  " ORDER BY `edited_on` DESC";
 			 
-		$result1 = mysql_query($query1);
+		$result1 = $mysqli->query($query1);
 		if (!$result1) {
-			$message1  = 'Invalid query: ' . mysql_error() . "\r\n";
-			$message1 .= 'Whole query: ' . $query1;
-			die($message1);
+			$message  = 'Invalid query: ' . $mysqli->error . "\r\n";
+			$message .= 'Whole query: ' . $query1;
+			die($message);
 		}
-		$sequence = mysql_num_rows($result1);
+		$sequence = $result1->num_rows;
 		
 		$strTmp = getVEVENT("TASK", 
 		                    $row['id'], 
@@ -183,14 +181,14 @@ if ($phoneCalls) {
 			 " LEFT JOIN `user_login` ON `user_login`.`id` = `phonecall_data_1`.`created_by`" .
 			 " WHERE (`phonecall_data_1`.`f_employees` LIKE '%\_\_" . $empId . "\_\_%') AND (`phonecall_data_1`.`active` = 1)";
 
-	$result = mysql_query($query);
+	$result = $mysqli->query($query);
 	if (!$result) {
-		$message  = 'Invalid query: ' . mysql_error() . "\r\n";
+		$message  = 'Invalid query: ' . $mysqli->error . "\r\n";
 		$message .= 'Whole query: ' . $query;
 		die($message);
 	}
 
-	while ($row = mysql_fetch_assoc($result)) {
+	while ($row = $result->fetch_assoc()) {
 
 		if (!$row['f_date_and_time']) {
 			$dtDateStart = getDatetime($row['created_on']) . "Z";
@@ -211,13 +209,13 @@ if ($phoneCalls) {
 				  " WHERE (`phonecall_edit_history`.`phonecall_id` = " . $row['id'] . ")" .
 				  " ORDER BY `edited_on` DESC";
 			 
-		$result1 = mysql_query($query1);
+		$result1 = $mysqli->query($query1);
 		if (!$result1) {
-			$message1  = 'Invalid query: ' . mysql_error() . "\r\n";
-			$message1 .= 'Whole query: ' . $query1;
-			die($message1);
+			$message  = 'Invalid query: ' . $mysqli->error . "\r\n";
+			$message .= 'Whole query: ' . $query1;
+			die($message);
 		}
-		$sequence = mysql_num_rows($result1);
+		$sequence = $result1->num_rows;
 				  
 		$strTmp = getVEVENT("PHONECALL", 
 		                    $row['id'], 
@@ -244,14 +242,14 @@ if ($meetings) {
 			 " LEFT JOIN `user_login` ON `user_login`.`id` = `crm_meeting_data_1`.`created_by`" .
 			 " WHERE (`crm_meeting_data_1`.`f_employees` LIKE '%\_\_" . $empId . "\_\_%') AND (`crm_meeting_data_1`.`active` = 1)";
 
-	$result = mysql_query($query);
+	$result = $mysqli->query($query);
 	if (!$result) {
-		$message  = 'Invalid query: ' . mysql_error() . "\r\n";
+		$message  = 'Invalid query: ' . $mysqli->error . "\r\n";
 		$message .= 'Whole query: ' . $query;
 		die($message);
 	}
 
-	while ($row = mysql_fetch_assoc($result)) {
+	while ($row = $result->fetch_assoc()) {
 
 		$duration = ((int) $row['f_duration']);
 		if ($duration < 0) {
@@ -278,13 +276,13 @@ if ($meetings) {
 				  " WHERE (`crm_meeting_edit_history`.`crm_meeting_id` = " . $row['id'] . ")" .
 				  " ORDER BY `edited_on` DESC";
 			 
-		$result1 = mysql_query($query1);
+		$result1 = $mysqli->query($query1);
 		if (!$result1) {
-			$message1  = 'Invalid query: ' . mysql_error() . "\r\n";
-			$message1 .= 'Whole query: ' . $query1;
-			die($message1);
+			$message  = 'Invalid query: ' . $mysqli->error . "\r\n";
+			$message .= 'Whole query: ' . $query1;
+			die($message);
 		}
-		$sequence = mysql_num_rows($result1);
+		$sequence = $result1->num_rows;
 		
 		$strTmp = getVEVENT("MEETING", 
 		                    $row['id'], 
