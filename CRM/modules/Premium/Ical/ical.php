@@ -18,7 +18,7 @@
  */ 
 
 define('VERSION','0.7');
-define('DOMAIN','domain.it');
+
 
 // Set headers
 header('Cache-Control: max-age=7200, private, must-revalidate');
