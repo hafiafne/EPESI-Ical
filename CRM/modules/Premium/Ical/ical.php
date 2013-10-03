@@ -2,14 +2,14 @@
 
 /**
  * ical.php
- * Genera file ical per importare calendario in Google Calendar 
+ * Generate an ical.ics file in iCalendar format
  * rev 0.1 - 2013-09-11 : initial version
  * rev 0.2 - 2013-09-22 : parametrized some values | bugfix
  * rev 0.3 - 2013-09-23 : inserted description field formatted
  * rev 0.5 - 2013-09-25 : Make changes to work with the Ical Module and minor fixes
  * rev 0.6 - 2013-09-28 : added status field and inserted an easy format way | added calendar name and description as configuration fields
  * rev 0.7 - 2013-09-29 : added VTODO | added SEQUENCE to notify update, based on latest modification
- * rev 0.8 - 2013-10-01 : switch to mysqli
+ * rev 0.8 - 2013-10-01 : added uuid for GET request, remove other GET requests. get MySQL settings from CRM configurations. get user settings in control Panel. | switch to mysqli
  *
  * parameter requested: _employeeid
  *
@@ -20,35 +20,18 @@
 
 define('VERSION','0.8');
 
-
 // Set headers
 header('Cache-Control: max-age=7200, private, must-revalidate');
 header('Content-Type: text/calendar');
 header('Content-Disposition: attachment; filename=ical.ics');
 
 ob_start("writebuffer");
-
-
-/* Database connection parameters */
-define('DATABASE_HOST', $_GET['srv']);
-define('DATABASE_USER', $_GET['usr']);
-define('DATABASE_PASSWORD', $_GET['pwd']);
-define('DATABASE_NAME', $_GET['db']);
-
-/* Time Location of calendar */
-define('LOCATION', $_GET['loc']);
-
-
-/* Domain used as event UID trail */
-define('DOMAIN', $_GET['domain']);
+define('_VALID_ACCESS', 'ical Module');
+require_once("../../../data/config.php"); //get DB connection parameters
 
 
 
-/* Parameters to be used by SELECT statement */
-$LoginId = $_GET["_employeeid"];
-$tasks = ($_GET["_ts"]) && ($_GET["_ts"] == '1');
-$phoneCalls = ($_GET["_pc"]) && ($_GET["_pc"] == '1');
-$meetings = ($_GET["_me"]) && ($_GET["_me"] == '1');
+
 
 
 /* Calendar Name and Description */
@@ -69,16 +52,38 @@ if ($mysqli->connect_errno) {
 }
 
 
-/* Retrieve employee Id from its username */
-$get_employeeid = $mysqli->query("SELECT `id` FROM `contact_data_1` WHERE `f_login` = $loginId") or die($mysqli->error);
-$row = $get_employeeid->fetch_assoc(); // get first row
-$empId = $row['id'];
+$check_hash = $mysqli->query("SELECT * FROM ical_hashlist WHERE hash = '".$_REQUEST['uid']."'");
+if($check_hash->num_rows == 0)
+{
+ die("Invalid uid, Please use a different uid or generate a new one in Menu-\>My Settings-\>Control Panel-\>Calendar Export Settings");
+}
+//Get user Configurations
+$row = $check_hash->fetch_assoc();
+$loginId = $row["logged_user_id"];
+$meetings = $row["_me"];
+$phoneCalls = $row["_pc"];
+$tasks = $row["_ts"];
+$domain = $row["domain"];
+$location = $row["location"];
 
+/* Domain used as event UID trail */
+if(trim($domain) != '')
+{
+	define('DOMAIN', $domain);
+}
+else
+{
+	define('DOMAIN','domain.it');
+}
 
+/* Time Location of calendar */
+define('LOCATION', $location);
 /* Setting script timezone location */
 date_default_timezone_set(LOCATION);
 
-
+$get_employeeid = $mysqli->query("SELECT `id` FROM `contact_data_1` WHERE `f_login` = $loginId") or die($mysqli->error);
+$row = $get_employeeid->fetch_assoc(); // get first row
+$empId = $row['id'];
 
 /* Create string for ical format */
 $strCalendar = "BEGIN:VCALENDAR\r\n" .
@@ -110,16 +115,16 @@ $strCalendar = "BEGIN:VCALENDAR\r\n" .
 			   "END:VTIMEZONE\r\n";
 
 
-
+			   
 // ***** TASK *****
 // Perform Query
-if ($tasks) {
+if ($tasks == 1) {
 	$query = "SELECT `user_login`.`login`," .
 			 "       `task_data_1`.`id`, `task_data_1`.`f_title`, `task_data_1`.`created_on`, `task_data_1`.`f_deadline`, `task_data_1`.`f_status`, `task_data_1`.`f_description`, `task_data_1`.`f_priority`" .
 			 " FROM `task_data_1`" . 
 			 " LEFT JOIN `user_login` ON `user_login`.`id` = `task_data_1`.`created_by`" .
 			 " WHERE (`task_data_1`.`f_employees` LIKE '%\_\_" . $empId . "\_\_%') AND (`task_data_1`.`active` = 1)";
-
+			 
 	$result = $mysqli->query($query);
 	if (!$result) {
 		$message  = 'Invalid query: ' . $mysqli->error . "\r\n";
@@ -138,10 +143,10 @@ if ($tasks) {
 			$dtDateStart = gmdate("Ymd", $iDateStart) . "T" . gmdate("His", $iDateStart) . "Z";
 			$iDateEnd = strtotime(getDatetime($row['f_deadline'])) + 3600;
 			$dtDateEnd = gmdate("Ymd", $iDateEnd) . "T" . gmdate("His", $iDateEnd) . "Z";
-		}
+		}	
 		$iDateCreation = strtotime(getDatetime($row['created_on']));
 		$dtDateCreation = gmdate("Ymd", $iDateCreation) . "T" . gmdate("His", $iDateCreation) . "Z";
-
+		
 		/* SEQUENCE */
 		$query1 = "SELECT `task_edit_history`.`edited_on`" .
 			      " FROM `task_edit_history`" . 
@@ -155,18 +160,18 @@ if ($tasks) {
 			die($message);
 		}
 		$sequence = $result1->num_rows;
-		
+			
 		$strTmp = getVEVENT("TASK", 
 		                    $row['id'], 
-						    $dtDateCreation, 
-						    $dtDateStart, 
-						    $dtDateEnd, 
-						    $row['f_title'], 
-						    $row['f_description'], 
-						    $row['f_priority'], 
-						    $sequence, 
-						    $row['f_status']);
-
+				    $dtDateCreation, 
+				    $dtDateStart, 
+				    $dtDateEnd, 
+				    $row['f_title'], 
+				    $row['f_description'], 
+				    $row['f_priority'], 
+				    $sequence, 
+				    $row['f_status']);
+		
 		$strCalendar = $strCalendar . $strTmp;
 	}
 }
@@ -174,13 +179,13 @@ if ($tasks) {
 
 // ***** PHONECALL *****
 // Perform Query
-if ($phoneCalls) {
+if ($phoneCalls == 1) {
 	$query = "SELECT `user_login`.`login`," .
 			 "       `phonecall_data_1`.`id`, `phonecall_data_1`.`f_subject`, `phonecall_data_1`.`created_on`, `phonecall_data_1`.`f_date_and_time`, `phonecall_data_1`.`f_status`, `phonecall_data_1`.`f_description`, `phonecall_data_1`.`f_priority`" .
 			 " FROM `phonecall_data_1`" . 
 			 " LEFT JOIN `user_login` ON `user_login`.`id` = `phonecall_data_1`.`created_by`" .
 			 " WHERE (`phonecall_data_1`.`f_employees` LIKE '%\_\_" . $empId . "\_\_%') AND (`phonecall_data_1`.`active` = 1)";
-
+			 
 	$result = $mysqli->query($query);
 	if (!$result) {
 		$message  = 'Invalid query: ' . $mysqli->error . "\r\n";
@@ -199,10 +204,10 @@ if ($phoneCalls) {
 			$dtDateStart = gmdate("Ymd", $iDateStart) . "T" . gmdate("His", $iDateStart) . "Z";
 			$iDateEnd = strtotime(getDatetime($row['f_date_and_time'])) + 3600;
 			$dtDateEnd = gmdate("Ymd", $iDateEnd) . "T" . gmdate("His", $iDateEnd) . "Z";
-		}
+		}	
 		$iDateCreation = strtotime(getDatetime($row['created_on']));
 		$dtDateCreation = gmdate("Ymd", $iDateCreation) . "T" . gmdate("His", $iDateCreation) . "Z";
-
+		
 		/* SEQUENCE */
 		$query1 = "SELECT `phonecall_edit_history`.`edited_on`" .
 			      " FROM `phonecall_edit_history`" . 
@@ -216,18 +221,18 @@ if ($phoneCalls) {
 			die($message);
 		}
 		$sequence = $result1->num_rows;
-				  
+		
 		$strTmp = getVEVENT("PHONECALL", 
 		                    $row['id'], 
-							$dtDateCreation, 
-							$dtDateStart, 
-							$dtDateEnd, 
-							$row['f_subject'], 
-							$row['f_description'], 
-							$row['f_priority'], 
-							$sequence, 
-							$row['f_status']);
-
+					$dtDateCreation, 
+					$dtDateStart, 
+					$dtDateEnd, 
+					$row['f_subject'], 
+					$row['f_description'], 
+					$row['f_priority'], 
+					$sequence, 
+					$row['f_status']);
+		
 		$strCalendar = $strCalendar . $strTmp;
 	}
 }
@@ -235,13 +240,13 @@ if ($phoneCalls) {
 
 // ***** MEETINGS *****
 // Perform Query
-if ($meetings) {
+if ($meetings == 1) {
 	$query = "SELECT `user_login`.`login`," .
 			 "       `crm_meeting_data_1`.`id`, `crm_meeting_data_1`.`f_title`, `crm_meeting_data_1`.`created_on`, `crm_meeting_data_1`.`f_date`, `crm_meeting_data_1`.`f_time`, `crm_meeting_data_1`.`f_duration`, `crm_meeting_data_1`.`f_status`, `crm_meeting_data_1`.`f_description`, `crm_meeting_data_1`.`f_priority`" .
 			 " FROM `crm_meeting_data_1`" . 
 			 " LEFT JOIN `user_login` ON `user_login`.`id` = `crm_meeting_data_1`.`created_by`" .
 			 " WHERE (`crm_meeting_data_1`.`f_employees` LIKE '%\_\_" . $empId . "\_\_%') AND (`crm_meeting_data_1`.`active` = 1)";
-
+			 
 	$result = $mysqli->query($query);
 	if (!$result) {
 		$message  = 'Invalid query: ' . $mysqli->error . "\r\n";
@@ -266,10 +271,10 @@ if ($meetings) {
 			$dtDateStart = gmdate("Ymd", $iDateStart) . "T" . gmdate("His", $iDateStart) . "Z";
 			$iDateEnd = $iDateStart + $duration;
 			$dtDateEnd = gmdate("Ymd", $iDateEnd) . "T" . gmdate("His", $iDateEnd) . "Z";
-		}
+		}	
 		$iDateCreation = strtotime(getDatetime($row['created_on']));
 		$dtDateCreation = gmdate("Ymd", $iDateCreation) . "T" . gmdate("His", $iDateCreation) . "Z";
-
+		
 		/* SEQUENCE */
 		$query1 = "SELECT `crm_meeting_edit_history`.`edited_on`" .
 			      " FROM `crm_meeting_edit_history`" . 
@@ -286,15 +291,15 @@ if ($meetings) {
 		
 		$strTmp = getVEVENT("MEETING", 
 		                    $row['id'], 
-							$dtDateCreation, 
-							$dtDateStart, 
-							$dtDateEnd, 
-							$row['f_title'], 
-							$row['f_description'], 
-							$row['f_priority'], 
-							$sequence, 
-							$row['f_status']);
-
+					$dtDateCreation, 
+					$dtDateStart, 
+					$dtDateEnd, 
+					$row['f_title'], 
+					$row['f_description'], 
+					$row['f_priority'], 
+					$sequence, 
+					$row['f_status']);
+		
 		$strCalendar = $strCalendar . $strTmp;
 	}
 }
@@ -338,7 +343,6 @@ function getVEVENT($TYPE, $ID, $DTSTAMP, $DTSTART, $DTEND, $TITLE, $DESCRIPTION,
 	return $strTmp;
 }
 
-
 /* GetVTODO: get VTODO formatted */
 function getVTODO($TYPE, $ID, $DTSTAMP, $DTSTART, $DTEND, $TITLE, $DESCRIPTION, $PRIORITY, $SEQUENCE, $STATUS) {
 
@@ -357,10 +361,9 @@ function getVTODO($TYPE, $ID, $DTSTAMP, $DTSTART, $DTEND, $TITLE, $DESCRIPTION, 
 	return $strTmp;
 }
 
-
 /* GetStatus: return status string from its index (CommonData) */
 function getStatus($istatus) {
-
+	
 	$status = "UNKNOWN";
 	switch ($istatus) {
 	    case "0":
@@ -375,7 +378,7 @@ function getStatus($istatus) {
 	    case "3":
 	        $status = "CLOSED";
 	        break;
-        case "4":
+            case "4":
 	        $status = "CANCELLED";
 	        break;
 	    default:
@@ -383,33 +386,6 @@ function getStatus($istatus) {
 	    	break;
 	}
 	return $status;
-}
-
-
-/* GetDatetime: return datetime string formatted in the right way from the one in EPESI database */
-function getDatetime($str) {
-
-	$strTmp = $str;
-	$strTmp = str_replace(' ', 'T', $strTmp);
-	$strTmp = str_replace('-', '', $strTmp);
-	$strTmp = str_replace(':', '', $strTmp);
-
-	return $strTmp;
-}
-
-
-/* PrepareField: return string formatted in right way to be inserted in ical format */
-function prepareField($str) {
-
-	$strTmp = $str;
-	$strTmp = str_replace(',', '\,', $strTmp);
-	$strTmp = str_replace(array("\r\n","\n","\r"),"\\n",$strTmp);
-	//$strTmp = str_replace(':', '\:', $strTmp);
-	//$strTmp = str_replace(';', '\;', $strTmp);
-	//$strTmp = str_replace('\'', '\\\'', $strTmp);
-	//$strTmp = str_replace('"', '\"', $strTmp);
-
-	return $strTmp;
 }
 
 
@@ -451,5 +427,31 @@ function getPriority($iPriority) {
 	return (3 - ((int) $iPriority));
 }
 
+
+/* GetDatetime: return datetime string formatted in the right way from the one in EPESI database */
+function getDatetime($str) {
+	
+	$strTmp = $str;
+	$strTmp = str_replace(' ', 'T', $strTmp);
+	$strTmp = str_replace('-', '', $strTmp);
+	$strTmp = str_replace(':', '', $strTmp);
+	
+	return $strTmp;
+}
+
+
+/* PrepareField: return string formatted in right way to be inserted in ical format */
+function prepareField($str) {
+
+	$strTmp = $str;
+	$strTmp = str_replace(',', '\,', $strTmp);
+	$strTmp = str_replace(array("\r\n","\n","\r"),"\\n",$strTmp);
+	//$strTmp = str_replace(':', '\:', $strTmp);
+	//$strTmp = str_replace(';', '\;', $strTmp);
+	//$strTmp = str_replace('\'', '\\\'', $strTmp);
+	//$strTmp = str_replace('"', '\"', $strTmp);
+	
+	return $strTmp;
+}
 
 ?>
